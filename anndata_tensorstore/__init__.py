@@ -3,5 +3,6 @@ from ._ext import (
     load_anndata_from_tensorstore,
     ATS_FILE_NAME
 )
+from ._version import version as __version__
 
 

@@ -6,7 +6,8 @@ import scipy
 import pickle
 from anndata import AnnData
 from typing import List, Union, Tuple
-
+import multiscale_spatial_image
+import tqdm
 from abc import ABC, ABCMeta
 from enum import Enum, EnumMeta, unique
 from functools import wraps
@@ -57,7 +58,7 @@ def save_X(X, output_path, chunk_size=100):
         write_future = dataset.write(X)
         write_result = write_future.result()
 
-def load_X(input_path, obs_indices=None, var_indices=None):
+def load_X(input_path, obs_indices=None, var_indices=None, show_progress=False, chunk_size=100):
     dataset = ts.open({
         'driver': 'zarr',
         'kvstore': {
@@ -67,15 +68,32 @@ def load_X(input_path, obs_indices=None, var_indices=None):
     }, create=False).result()
     
     if obs_indices is None and var_indices is None:
-        X = dataset.read().result() 
+        handler = dataset
     elif obs_indices is not None and var_indices is None:
-        X = dataset[obs_indices, :].read().result()
+        handler = dataset[obs_indices, :]
     elif obs_indices is None and var_indices is not None:
-        X = dataset[:, var_indices].read().result()
+        handler = dataset[:, var_indices]
     else:
-        X = dataset[obs_indices, var_indices].read().result()
-    if len(X.shape) == 1:
-        X = X.reshape(-1, 1)
+        handler = dataset[obs_indices, :][:, var_indices]
+
+    Xs = []
+    if show_progress:
+        pbar = tqdm.tqdm(
+            total=handler.shape[0],
+            desc="Loading data", 
+            bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}',
+            position=0, 
+            leave=True
+        )
+    for e in range(0, handler.shape[0], chunk_size):
+        x = handler[e:min(handler.shape[0], e+chunk_size)].read().result()
+        if len(x.shape) == 1:
+            x = x.reshape(-1, 1)
+        Xs.append(scipy.sparse.csr_matrix(x))
+        if show_progress:
+            pbar.update(chunk_size)
+    pbar.close()
+    X = scipy.sparse.vstack(Xs)
     return X
 
 def save_np_array_to_tensorstore(Z, output_path):
@@ -129,29 +147,29 @@ def save_anndata_to_tensorstore(
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
-    if adata.X is not None:
+    if hasattr(adata, 'X') and adata.X is not None:
         save_X(adata.X, os.path.join(output_path, 'X'))
 
-    if adata.obs is not None:
+    if hasattr(adata, 'obs') and adata.obs is not None:
         check_is_parquet_serializable(adata.obs)
         adata.obs.to_parquet(os.path.join(output_path, 'obs.parquet'))
 
-    if adata.var is not None:
+    if hasattr(adata, 'var') and adata.var is not None:
         check_is_parquet_serializable(adata.var)
         adata.var.to_parquet(os.path.join(output_path, 'var.parquet'))
 
-    if adata.obsm is not None:
+    if hasattr(adata, 'obsm') and adata.obsm is not None:
         for k, v in adata.obsm.items():
             save_np_array_to_tensorstore(v, os.path.join(output_path, f'obsm/{k}'))
 
-    if adata.varm is not None:
+    if hasattr(adata, 'varm') and adata.varm is not None:
         for k, v in adata.varm.items():
             save_np_array_to_tensorstore(v, os.path.join(output_path, f'varm/{k}'))
 
     if not os.path.exists(os.path.join(output_path, 'uns')):
         os.makedirs(os.path.join(output_path, 'uns'))
 
-    if adata.uns is not None:
+    if hasattr(adata, 'uns') and adata.uns is not None:
         for k, v in adata.uns.items():
             if isinstance(v, pd.DataFrame):
                 check_is_parquet_serializable(v)
@@ -219,26 +237,26 @@ def load_anndata_from_tensorstore(
             print("Warning: var_names will override var_indices")
         var_indices = var.index.isin(var_names)
     
-
-    _X = load_X(os.path.join(input_path, 'X'), obs_indices, var_indices)
-    if as_sparse:
-        _X = scipy.sparse.csr_matrix(_X)
-
     if var_indices is None and var_selection is not None:
         var_indices = np.zeros(_X.shape[1], dtype=bool)
         for k, v in var_selection:
             if isinstance(v, list):
-                var_indices = var_indices | pd.Series(var[k]).isin(v)
+                var_indices = var_indices | np.array(pd.Series(var[k]).isin(v))
             else:
-                var_indices = var_indices | (var[k] == v).values
+                var_indices = var_indices | np.array((var[k] == v).values)
+
     if obs_indices is None and obs_selection is not None:
         obs = pd.read_parquet(os.path.join(input_path, 'obs.parquet'))
         obs_indices = np.zeros(obs.shape[0], dtype=bool)
         for k, v in obs_selection:
             if isinstance(v, list):
-                obs_indices = obs_indices | pd.Series(obs[k]).isin(v)
+                obs_indices = obs_indices | np.array(pd.Series(obs[k]).isin(v))
             else:
-                obs_indices = obs_indices | (obs[k] == v).values
+                obs_indices = obs_indices | np.array((obs[k] == v).values)
+
+    _X = load_X(os.path.join(input_path, 'X'), obs_indices, var_indices)
+    if as_sparse:
+        _X = scipy.sparse.csr_matrix(_X)
 
     if os.path.exists(os.path.join(input_path, 'obs.parquet')):
         obs = pd.read_parquet(os.path.join(input_path, 'obs.parquet'))
@@ -330,6 +348,10 @@ def load_anndata_from_tensorstore(
         layers=_layers
     )
     if os.path.exists(os.path.join(input_path, 'raw')):
-        adata.raw = load_anndata_from_tensorstore(os.path.join(input_path, 'raw'), obs_indices, var_indices)
+        adata.raw = load_anndata_from_tensorstore(
+            os.path.join(input_path, 'raw'), 
+            obs_indices, 
+            var_indices
+        )
 
     return adata

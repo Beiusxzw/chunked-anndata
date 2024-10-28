@@ -22,7 +22,9 @@ setuptools.setup(
         'pandas',
         'numpy',
         'scipy',
-        'anndata'
+        'anndata',
+        'geopandas',
+        'multiscale_spatial_image'
     ],
     include_package_data=False,
 )
