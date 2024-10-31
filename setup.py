@@ -12,6 +12,7 @@ setuptools.setup(
     author="Ziwei Xue",
     author_email="xueziweisz@gmail.com",
     description="Anndata Tensorstore Extension: Save and Load anndata to/from Tensorstore for random access",
+    long_description=long_description,
     long_description_content_type='text/plain',
     packages=setuptools.find_packages(exclude=[
         "*docs*",
@@ -24,7 +25,7 @@ setuptools.setup(
         'scipy',
         'anndata',
         'geopandas',
-        'multiscale_spatial_image'
+        'fastparquet'
     ],
     include_package_data=False,
 )

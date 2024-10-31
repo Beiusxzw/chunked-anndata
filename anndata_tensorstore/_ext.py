@@ -6,7 +6,7 @@ import scipy
 import pickle
 from anndata import AnnData
 from typing import List, Union, Tuple
-import multiscale_spatial_image
+# import multiscale_spatial_image
 import tqdm
 from abc import ABC, ABCMeta
 from enum import Enum, EnumMeta, unique
@@ -33,11 +33,45 @@ class ModeEnum(str, PrettyEnum, metaclass=EnumMeta):
 
 @unique
 class ATS_FILE_NAME(ModeEnum):
+    X = 'X'
     obs = 'obs.parquet'
     var = 'var.parquet'
+    obsm = 'obsm'
+    varm = 'varm'
+    uns = 'uns'
+    layers = 'layers'
+    raw = 'raw'
 
 
-def save_X(X, output_path, chunk_size=100):
+@unique 
+class DTYPE(PrettyEnum):
+    # check for edianess
+    float16 = np.dtype(np.float16).str
+    float32 = np.dtype(np.float32).str
+    float64 = np.dtype(np.float64).str
+    int8 = np.dtype(np.int8).str
+    int16 = np.dtype(np.int16).str
+    int32 = np.dtype(np.int32).str
+    int64 = np.dtype(np.int64).str
+    uint8 = np.dtype(np.uint8).str
+    uint16 = np.dtype(np.uint16).str
+    uint32 = np.dtype(np.uint32).str
+    uint64 = np.dtype(np.uint64).str
+
+def save_X(
+    X: Union[scipy.sparse.spmatrix, np.ndarray], 
+    output_path: Union[str, os.PathLike], 
+    chunk_size: int = 100, 
+    dtype: DTYPE = None
+):
+    """
+    Save a matrix to a tensorstore.
+
+    :param X: The matrix to save.
+    :param output_path: The path to the tensorstore.
+    :param chunk_size: The chunk size to write.
+    :param dtype: The data type to save.
+    """
     dataset = ts.open({
         'driver': 'zarr',
         'kvstore': {
@@ -45,20 +79,94 @@ def save_X(X, output_path, chunk_size=100):
             'path': output_path,
         },
         'metadata': {
-            'dtype': X.dtype.str,
+            'dtype': X.dtype.str if dtype is None else dtype,
             'shape': X.shape
         },
     }, create=True, delete_existing=True).result()
 
     if scipy.sparse.issparse(X):
         for e in range(0,X.shape[0],chunk_size):
-            write_future = dataset[e:min(X.shape[0], e+chunk_size), :].write(X[e:e+chunk_size].toarray())
+            towrite = X[e:e+chunk_size].toarray()
+            if dtype is not None:
+                towrite = towrite.astype(dtype)
+            write_future = dataset[e:min(X.shape[0], e+chunk_size), :].write(towrite)
             write_result = write_future.result()
     else:
         write_future = dataset.write(X)
         write_result = write_future.result()
 
-def load_X(input_path, obs_indices=None, var_indices=None, show_progress=False, chunk_size=100):
+def concat_and_save_X(
+    X2: Union[scipy.sparse.spmatrix, np.ndarray], 
+    output_path: Union[str, os.PathLike],
+    chunk_size: int = 100
+):
+    dataset = ts.open({
+        'driver': 'zarr',
+        'kvstore': {
+            'driver': 'file',
+            'path': output_path,
+        }
+    })
+
+    if dataset.shape[0] != X2.shape[0] and dataset.shape[1] == X2.shape[1]:
+        # Determine the original and new shapes
+        original_rows = dataset.shape[0]
+        new_rows = original_rows + X2.shape[0]
+        new_shape = (new_rows, dataset.shape[1])
+
+        # Resize the dataset to accommodate additional rows
+        dataset = dataset.resize(new_shape).result()
+
+        # Write X2 to the expanded portion of the dataset
+        if scipy.sparse.issparse(X2):
+            for e in range(0, X2.shape[0], chunk_size):
+                write_future = dataset[original_rows + e : original_rows + e + chunk_size, :].write(X2[e : e + chunk_size].toarray())
+                write_result = write_future.result()
+        else:
+            write_future = dataset[original_rows:new_rows, :].write(X2)
+            write_result = write_future.result()
+    elif dataset.shape[0] == X2.shape[0] and dataset.shape[1] != X2.shape[1]:
+        # Determine the original and new shapes
+        original_cols = dataset.shape[1]
+        new_cols = original_cols + X2.shape[1]
+        new_shape = (dataset.shape[0], new_cols)
+
+        # Resize the dataset to accommodate additional columns
+        dataset = dataset.resize(new_shape).result()
+
+        # Write X2 to the expanded portion of the dataset
+        if scipy.sparse.issparse(X2):
+            for e in range(0, X2.shape[1], chunk_size):
+                write_future = dataset[:, original_cols + e : original_cols + e + chunk_size].write(X2[:, e : e + chunk_size].toarray())
+                write_result = write_future.result()
+        else:
+            write_future = dataset[:, original_cols:new_cols].write(X2)
+            write_result = write_future.result()
+    else:
+        raise ValueError("The shapes of the two matrices do not match, not supported yet")
+
+def load_X(
+    input_path: Union[str, os.PathLike], 
+    obs_indices: Union[slice, np.ndarray] = None,
+    var_indices: Union[slice, np.ndarray] = None,
+    show_progress: bool = False,
+    chunk_size: int = 1024,
+    to_sparse: bool = True,
+    sparse_format: Callable = scipy.sparse.csr_matrix
+) -> Union[np.ndarray, scipy.sparse.spmatrix]:
+    """
+    Load a matrix from a tensorstore.
+
+    :param input_path: The path to the tensorstore.
+    :param obs_indices: The row indices to load.
+    :param var_indices: The column indices to load.
+    :param show_progress: Whether to show a progress bar.
+    :param chunk_size: The chunk size to read.
+    :param to_sparse: Whether to return a sparse matrix.
+    :param sparse_format: The sparse matrix format to use
+    
+    :return: The matrix.
+    """
     dataset = ts.open({
         'driver': 'zarr',
         'kvstore': {
@@ -89,14 +197,30 @@ def load_X(input_path, obs_indices=None, var_indices=None, show_progress=False, 
         x = handler[e:min(handler.shape[0], e+chunk_size)].read().result()
         if len(x.shape) == 1:
             x = x.reshape(-1, 1)
-        Xs.append(scipy.sparse.csr_matrix(x))
+        if to_sparse:
+            Xs.append(sparse_format(x))
+        else:
+            Xs.append(x)
         if show_progress:
             pbar.update(chunk_size)
-    pbar.close()
-    X = scipy.sparse.vstack(Xs)
+    if show_progress:
+        pbar.close()
+    if to_sparse:
+        X = scipy.sparse.vstack(Xs)
+    else:
+        X = np.vstack(Xs)
     return X
 
-def save_np_array_to_tensorstore(Z, output_path):
+def save_np_array_to_tensorstore(
+    Z: np.ndarray, 
+    output_path: Union[str, os.PathLike]
+):
+    """
+    Save a numpy array to a tensorstore.
+
+    :param Z: The numpy array to save.
+    :param output_path: The path to the tensorstore.
+    """
     dataset = ts.open({
         'driver': 'zarr',
         'kvstore': {
@@ -113,7 +237,16 @@ def save_np_array_to_tensorstore(Z, output_path):
     write_result = write_future.result()
 
 
-def load_np_array_from_tensorstore(input_path, obs_indices=None):
+def load_np_array_from_tensorstore(
+    input_path: Union[str, os.PathLike], 
+    obs_indices: Union[slice, np.ndarray] = None
+) -> np.ndarray:
+    """
+    Load a numpy array from a tensorstore.
+
+    :param input_path: The path to the tensorstore.
+    :param obs_indices: The row indices to load.
+    """
     dataset = ts.open({
         'driver': 'zarr',
         'kvstore': {
@@ -136,19 +269,23 @@ def check_is_parquet_serializable(obj: pd.DataFrame):
 
 def save_anndata_to_tensorstore(
     adata: AnnData,
-    output_path: str
+    output_path: str,
+    is_raw_count: bool = False
 ):
     """
     Save an AnnData object to a tensorstore.
 
     :param adata: The AnnData object to save.
     :param output_path: The path to the tensorstore.
+    :param is_raw_count: Whether the AnnData object is raw count data. 
+                         If True, the raw count matrix will be saved as uint32 for memory efficiency.
+
     """
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
     if hasattr(adata, 'X') and adata.X is not None:
-        save_X(adata.X, os.path.join(output_path, 'X'))
+        save_X(adata.X, os.path.join(output_path, 'X'), dtype=DTYPE.uint32 if is_raw_count else None)
 
     if hasattr(adata, 'obs') and adata.obs is not None:
         check_is_parquet_serializable(adata.obs)
@@ -185,26 +322,6 @@ def save_anndata_to_tensorstore(
     if adata.raw is not None:
         save_anndata_to_tensorstore(adata.raw, os.path.join(output_path, 'raw'))
 
-class PreviewObject:
-    def __init__(self, obj):
-        self.obj = obj
-
-    def __str__(self):
-        return str(self.obj)
-
-    def __repr__(self):
-        return self.obj
-
-def preview_anndata_from_tensorstore(
-    input_path: str,
-):
-    obs = pd.read_parquet(os.path.join(input_path, 'obs.parquet'))
-    var = pd.read_parquet(os.path.join(input_path, 'var.parquet'))
-    return PreviewObject(
-           "AnnData object with n_obs × n_vars = {} × {}".format(obs.shape[0], var.shape[0]) + '\n' + \
-           "    obs: {}".format(', '.join(obs.columns)) + '\n' + \
-           "    var: {}".format(', '.join(var.columns)) + '\n'
-    )
 
 def load_anndata_from_tensorstore(
     input_path: str, 
