@@ -4,7 +4,7 @@
    contain the root `toctree` directive.
 
 Welcome to AnnData-Tensorstore's documentation!
-============================================
+================================================
 
 .. toctree::
    :maxdepth: 4
