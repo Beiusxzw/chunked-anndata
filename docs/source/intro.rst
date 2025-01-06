@@ -22,7 +22,7 @@ Writing an AnnData object to a Tensorstore
 .. code-block:: python
 
     import anndata
-    import anndata_tensorstore
+    import chunked_anndata
 
     adata = anndata.read_h5ad("path/to/anndata.h5ad")
     ats.save(anndata, "path/to/large_anndata.ats", is_raw_count=True)
@@ -33,7 +33,7 @@ Reading an AnnData object from a Tensorstore
 .. code-block:: python
     
     import anndata
-    import anndata_tensorstore
+    import chunked_anndata
     ats.view("path/to/large_anndata.ats")
 
     # Load the entire data from the storage
