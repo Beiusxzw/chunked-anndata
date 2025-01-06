@@ -1,6 +1,6 @@
-# Tensorstore Extension for AnnData 
+# Chunked Saving/Loading AnnData 
 
-This extension provides support for reading and writing [AnnData](https://anndata.readthedocs.io/en/latest/) objects using the [Tensorstore](https://google.github.io/tensorstore/)
+This extension provides support for reading and writing [AnnData](https://anndata.readthedocs.io/en/latest/) objects.
 
 ## Design Goals
 
@@ -10,8 +10,7 @@ This extension provides support for reading and writing [AnnData](https://anndat
 - **Caveats**: This extension is not optimized for read/write speed.
 
 
-
-## Installation
+## ![anndata_tensorstor](./docs/source/_static/images/anndata_tensorstor.jpeg)Installation
 
 ```bash
 pip install anndata-tensorstore

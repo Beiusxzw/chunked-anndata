@@ -1,17 +1,17 @@
 import setuptools 
-from anndata_tensorstore._version import version
+from src._version import version
 
 version = version
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
     
 setuptools.setup(
-    name="anndata-tensorstore",
+    name="chunked-anndata",
     version=version,
-    url="https://github.com/xueziwei/anndata-tensorstore",
+    url="https://github.com/xueziwei/chunked-anndata",
     author="Ziwei Xue",
     author_email="xueziweisz@gmail.com",
-    description="Anndata Tensorstore Extension: Save and Load anndata to/from Tensorstore for random access",
+    description="Save and Load anndata in chunked format for random access",
     long_description=long_description,
     long_description_content_type='text/plain',
     packages=setuptools.find_packages(exclude=[
@@ -25,7 +25,11 @@ setuptools.setup(
         'scipy',
         'anndata',
         'geopandas',
-        'fastparquet'
+        'fastparquet',
+        'xarray',
+        'zarr',
+        'dask',
+        'spatial_image',
     ],
     include_package_data=False,
 )

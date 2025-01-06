@@ -4,9 +4,9 @@ from ._ext import (
     ATS_FILE_NAME,
     DTYPE,
 )
-from ._ats import AnndataTensorStore as ATS
+from ._ats import ChunkedAnnData
 from ._version import version as __version__
 
-view = ATS.view
+view = ChunkedAnnData.view
 load = load_anndata_from_tensorstore
 save = save_anndata_to_tensorstore

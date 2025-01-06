@@ -1,8 +1,8 @@
-Introduction to AnnData-Tensorstore
+Introduction to chunked-anndata
 ===================================
 
-- **The challenge**: Large single-cell anndata object are often too large to fit in [RAM](https://en.wikipedia.org/wiki/Random-access_memory) and save in disk. 
-- **The solution**: [Tensorstore](https://google.github.io/tensorstore/) provides a way to read and write data in a variety of formats, including [Zarr](https://zarr.dev/). This extension provides a way to read anndata objects with specific rows (cells) and columns (genes) from a Zarr store. **You will not need to load the entire anndata object into memory to access a subset of the data.**
+- **The challenge**: Large single-cell anndata object are often too large to fit in `RAM <https://en.wikipedia.org/wiki/Random-access_memory>`_ and save in disk. 
+- **The solution**: `Tensorstore <https://google.github.io/tensorstore/>`_ provides a way to read and write data in a variety of formats, including `Zarr <https://zarr.dev/>`_. This extension provides a way to read anndata objects with specific rows (cells) and columns (genes) from a Zarr store. **You will not need to load the entire anndata object into memory to access a subset of the data.**
 - **Caveats**: This extension is still in development and may not support all features of AnnData objects.
 - **Caveats**: This extension is not optimized for read/write speed.
 
@@ -11,7 +11,7 @@ Installation
 
 .. code-block:: bash
 
-    pip install anndata-tensorstore
+    pip install chunked-anndata
 
 Usage
 -----

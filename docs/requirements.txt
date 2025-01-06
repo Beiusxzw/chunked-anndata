@@ -22,3 +22,7 @@ tensorstore
 scipy
 geopandas
 fastparquet
+xarray
+zarr
+spatial_image
+dask
