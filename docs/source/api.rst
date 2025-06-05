@@ -7,6 +7,7 @@ Main functions
 .. autofunction:: chunked_anndata.view
 .. autofunction:: chunked_anndata.load
 .. autofunction:: chunked_anndata.save
+.. autofunction:: chunked_anndata.concat
 
 
 Utility functions

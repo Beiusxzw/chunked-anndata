@@ -1,0 +1,133 @@
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    margin-top: 16px;
+}
+
+.output_area img {
+    max-width: 500px !important;
+}
+
+.rst-content code.literal {
+    color: #218378 !important;
+    font-size: 10pt;
+}
+
+。toctree-l3 .docutils .literal {
+    font-size: 14pt;
+}
+
+.wy-nav-content a {
+    color: #218352 !important;
+}
+
+.wy-nav-content a:hover {
+    color: #55be89 !important;
+}
+
+.wy-nav-side {
+    background: #343131 !important;
+}
+
+.wy-nav-content {
+    max-width: 60vw !important;
+}
+
+.wy-side-nav-search {
+    background-color: #002143 !important;
+}
+
+.rst-content .note .admonition-title {
+    background: #297922 !important;
+}
+
+.rst-content .note {
+    background: #E8FAE7 !important
+}
+
+.input_area .highlight {
+    background-color: #fdfdea !important;
+    border-color: #9fe4c2 !important;
+}
+
+.highlight {
+    background-color: #F3F3F3;
+}
+
+.highlight pre {
+    font-size: 10pt !important;
+}
+
+.rst-content div[class^=highlight] div[class^=highlight],
+.rst-content pre.literal-block div[class^=highlight] {
+    border: solid !important;
+    border-width: 1px !important;
+}
+
+pre {
+    background-color: #f9fafb;
+}
+
+.sidebar-brand-text {
+    font-size: 1rem;
+}
+
+.sidebar-drawer {
+    background-color: #FFFFFF !important;
+}
+
+.toctree-l1 a {
+    color: #030303 !important;
+}
+.toctree-l2 a {
+    color: #030303 !important;
+}
+.toctree-l3 a {
+    color: #030303 !important;
+}
+
+.function em {
+    white-space: pre;
+    display: inline;
+}
+
+.function em::before {
+    content: "";
+    display: block; /* Forces a line break */
+    text-indent: 2.5em;
+}
+
+.py.class em {
+    white-space: pre;
+    display: inline;
+}
+
+.py.class em.sig-param::before {
+    content: "";
+    display: block; /* Forces a line break */
+    text-indent: 2.5em;
+}
+
+
+.sig-paren::before {
+    content: "";
+    display: var(--line-break-content, inline);
+    text-indent: 2.5em;
+}
+
+.sig-inline, code.literal {
+    background: none;
+}
+
+.sig:not(.sig-inline) {
+    text-indent: 0;
+}
+
+.remove-before::before {
+    content: none !important;
+    text-indent: 0 !important;
+    display: inline !important;
+}

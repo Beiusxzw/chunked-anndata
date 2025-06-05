@@ -116,7 +116,7 @@ def save_X(
         write_future = dataset.write(X)
         write_result = write_future.result()
 
-def concat_and_save_X(
+def concat_X(
     X2: Union[scipy.sparse.spmatrix, np.ndarray], 
     output_path: Union[str, os.PathLike],
     chunk_size: int = 100,
@@ -361,7 +361,42 @@ def load_chunked_sparse_matrix_from_tensorstore(
     
     return scipy.sparse.vstack(Xs)  
     
+def concat_chunked_sparse_matrix_to_tensorstore(
+    X2: scipy.sparse.csr_matrix,
+    output_path: Union[str, os.PathLike],
+    chunk_size: int = 32768,
+    dtype: Optional[np.dtype] = None
+):
+    if not os.path.exists(output_path):
+        raise FileNotFoundError(f"Output path {output_path} does not exist.")
+    if not os.path.exists(os.path.join(output_path, '0')):
+        raise FileNotFoundError(f"Output path {output_path} does not contain any data.")
+    es = np.array(sorted(list(map(int, os.listdir(output_path)))))
+    tail = es[-1]
+    X1 = load_csr_matrix_from_tensorstore(
+        os.path.join(output_path, f'{tail}'),
+    )
+    if X1.shape[1] != X2.shape[1]:
+        raise ValueError(f"Number of columns in {output_path} ({X1.shape[1]}) does not match number of columns in X2 ({X2.shape[1]}).")
+    if X1.shape[0] > chunk_size:
+        raise ValueError(f"Number of rows in {output_path} ({X1.shape[0]}) is greater than chunk size ({chunk_size}).")
     
+    if X1.shape[0] < chunk_size:
+        new_X1 = scipy.sparse.vstack([X1, X2[:chunk_size - X1.shape[0], :]])
+        save_csr_matrix_to_tensorstore(
+            new_X1,
+            os.path.join(output_path, f'{tail}'),
+        )
+        start = chunk_size - X1.shape[0]
+    else:
+        start = 0
+    for e in range(start, X2.shape[0], chunk_size):
+        towrite = X2[e:e+chunk_size]
+        if dtype is not None:
+            towrite.data = towrite.data.astype(dtype)
+        save_csr_matrix_to_tensorstore(towrite, os.path.join(output_path, f'{tail + 1 + e // chunk_size}'))
+    
+
 def check_is_parquet_serializable(obj: pd.DataFrame):
     for c in obj.columns:
         if obj[c].dtype == 'O':
@@ -406,7 +441,7 @@ def save_anndata_to_tensorstore(
         version=package_version,
         sparse_storage=sparse_storage,
         chunk_size=chunk_size,
-        obs_is_gpd=isinstance(adata.obs, geopandas.GeoDataFrame),
+        obs_is_gpd=isinstance(adata.obs, geopandas.GeoDataFrame) if hasattr(adata, 'obs') else False
     )
     with open(os.path.join(output_path, 'storage.config'),'w+') as f:
         json.dump(config, f)
@@ -492,6 +527,7 @@ def load_anndata_from_tensorstore(
     sparse_storage: bool = True,
     as_sparse: bool = True,
     chunk_size: int = 1024,
+    load_layers_as_X: Optional[str] = None,
     obs_is_gpd: bool = False
 ):
     """
@@ -502,7 +538,14 @@ def load_anndata_from_tensorstore(
     :param var_indices: The column indices to load.
     :param obs_selection: The row selection to load.
     :param var_selection: The column selection to load.
+    :param obs_names: The observation names to load.
     :param var_names: The variable names to load.
+    :param sparse_storage: Whether the matrix is stored in sparse format.
+    :param as_sparse: Whether to return the matrix as a sparse matrix.
+    :param chunk_size: The chunk size to read.
+    :param load_layers_as_X: The layer to load as the X matrix. 
+        If specified, the X matrix will be loaded from the layers, and other layers will be ignored.
+    :param obs_is_gpd: Whether the observation is a GeoPandas DataFrame.
     """
 
     if os.path.exists(os.path.join(input_path, 'storage.config')):
@@ -547,18 +590,31 @@ def load_anndata_from_tensorstore(
                 obs_indices = obs_indices | np.array(pd.Series(obs[k]).isin(v))
             else:
                 obs_indices = obs_indices | np.array((obs[k] == v).values)
-                
-    if sparse_storage:
-        _X = load_chunked_sparse_matrix_from_tensorstore(
-            os.path.join(input_path, 'X'), 
-            obs_indices, 
-            var_indices,
-            chunk_size = chunk_size
-        )
+    
+    if load_layers_as_X is not None:
+        if sparse_storage:
+            _X = load_chunked_sparse_matrix_from_tensorstore(
+                os.path.join(input_path, 'layers', load_layers_as_X), 
+                obs_indices, 
+                var_indices,
+                chunk_size = chunk_size
+            )
+        else:
+            _X = load_X(os.path.join(input_path, 'layers', load_layers_as_X), obs_indices, var_indices)
+        if as_sparse:
+            _X = scipy.sparse.csr_matrix(_X)
     else:
-        _X = load_X(os.path.join(input_path, 'X'), obs_indices, var_indices)
-    if as_sparse:
-        _X = scipy.sparse.csr_matrix(_X)
+        if sparse_storage:
+            _X = load_chunked_sparse_matrix_from_tensorstore(
+                os.path.join(input_path, 'X'), 
+                obs_indices, 
+                var_indices,
+                chunk_size = chunk_size
+            )
+        else:
+            _X = load_X(os.path.join(input_path, 'X'), obs_indices, var_indices)
+        if as_sparse:
+            _X = scipy.sparse.csr_matrix(_X)
 
     if os.path.exists(os.path.join(input_path, 'obs.parquet')):
         obs = pd.read_parquet(os.path.join(input_path, 'obs.parquet'))
@@ -646,14 +702,17 @@ def load_anndata_from_tensorstore(
                     _uns[fname] = pickle.load(f)
 
     _layers = None
-    if os.path.exists(os.path.join(input_path, 'layers')):
-        _layers = {}
-        for f in os.listdir(os.path.join(input_path, 'layers')):
-            if sparse_storage:
-                 _layers[f] = load_chunked_sparse_matrix_from_tensorstore(os.path.join(input_path, 'layers', f), obs_indices, var_indices)
-            else:
-                _layers[f] = load_X(os.path.join(input_path, 'layers', f), obs_indices, var_indices)
-
+    if load_layers_as_X is None:
+        if os.path.exists(os.path.join(input_path, 'layers')):
+            _layers = {}
+            for f in os.listdir(os.path.join(input_path, 'layers')):
+                if sparse_storage:
+                    _layers[f] = load_chunked_sparse_matrix_from_tensorstore(os.path.join(input_path, 'layers', f), obs_indices, var_indices)
+                else:
+                    _layers[f] = load_X(os.path.join(input_path, 'layers', f), obs_indices, var_indices)
+                if as_sparse:
+                    _layers[f] = scipy.sparse.csr_matrix(_layers[f])
+    
     adata = AnnData(
         X=_X,
         obs=_obs,
@@ -672,12 +731,104 @@ def load_anndata_from_tensorstore(
 
     return adata
 
-def append_adata_to_tensorstore(
-    adata: AnnData,
-    output_path: str
+def concat_anndata_to_tensorstore(
+    adata2: AnnData,
+    output_path: str,
+    chunk_size: Optional[int] = None,
+    is_raw_count: bool = False,
+    sparse_storage: bool = True,
+    obs_join: str = 'outer',
 ):
-    result = ts.open(os.path.join(output_path, 'X')).result()
+    """
+    Concatenate an AnnData object to an existing tensorstore, without loading 
+
+    :param adata2: The AnnData object to concatenate.
+    :param output_path: The path to the tensorstore.
+    :param chunk_size: The chunk size to write.
+    :param is_raw_count: Whether the AnnData object is raw count data. 
+                         If True, the raw count matrix will be saved as uint32 for memory efficiency.
+    :param sparse_storage: Whether to save the matrix into sparse format.
+    :param obs_join: The type of join to use for the observation metadata (adata.obs)
+
+    :note: This function overwrite the existing data in the tensorstore.
+    """
     
+    if not os.path.exists(output_path):
+        raise FileNotFoundError(f"Output path {output_path} does not exist.")
+    
+    if not os.path.exists(os.path.join(output_path, 'storage.config')):
+        raise FileNotFoundError(f"Output path {output_path} does not contain any data.")
+    
+    with open(os.path.join(output_path, 'storage.config')) as f:
+        config = json.load(f)
+
+    if 'sparse_storage' in config.keys():
+        sparse_storage = config['sparse_storage']
+
+    if 'chunk_size' in config.keys():
+        chunk_size = config['chunk_size']
+
+    var2 = adata2.var
+    obs2 = adata2.obs
+
+    if os.path.exists(os.path.join(output_path, 'var.parquet')):
+        var1 = pd.read_parquet(os.path.join(output_path, 'var.parquet'))
+
+        if var1.columns.tolist() != var2.columns.tolist():
+            raise ValueError(f"Variable names in {output_path} do not match variable names in adata2.")
+        
+
+    if os.path.exists(os.path.join(output_path, 'obs.parquet')):
+        if 'obs_is_gpd' in config.keys():
+            obs_is_gpd = config['obs_is_gpd']
+
+        if obs_is_gpd:
+            obs1 = geopandas.read_parquet(os.path.join(output_path, 'obs.parquet'))
+        else:
+            obs1 = pd.read_parquet(os.path.join(output_path, 'obs.parquet'))
+        new_obs = pd.concat([obs1, obs2], ignore_index=True, join=obs_join)
+        check_is_parquet_serializable(new_obs)
+        new_obs.to_parquet(os.path.join(output_path, 'obs.parquet'))
+
+    
+    if hasattr(adata2, 'X') and adata2.X is not None:
+        if sparse_storage:
+            concat_chunked_sparse_matrix_to_tensorstore(
+                adata2.X, 
+                os.path.join(output_path, 'X'),
+                chunk_size = chunk_size,
+                dtype= DTYPE.uint32 if is_raw_count else None
+            )
+        else:
+            concat_X(
+                adata2.X, 
+                os.path.join(output_path, 'X'),
+                chunk_size = chunk_size,
+                dtype= DTYPE.uint32 if is_raw_count else None
+            )
+
+    if adata2.layers is not None:
+        for k, v in adata2.layers.items():
+            if os.path.exists(os.path.join(output_path, 'layers', k)):
+                if sparse_storage:
+                    concat_chunked_sparse_matrix_to_tensorstore(
+                        v, 
+                        os.path.join(output_path, f'layers/{k}'),
+                        chunk_size = chunk_size
+                    )
+                else:
+                    concat_X(
+                        v, 
+                        os.path.join(output_path, f'layers/{k}'),
+                        chunk_size = chunk_size
+                    )
+
+    if os.path.exists(os.path.join(output_path, 'obsm')):
+        os.rmdir(os.path.join(output_path, 'obsm'))
+    
+    if os.path.exists(os.path.join(output_path, 'varm')):
+        os.rmdir(os.path.join(output_path, 'varm'))
+
 
 def save_spatial_image(
     img: Union[xr.core.dataarray.DataArray, np.ndarray],
